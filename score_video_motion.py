@@ -215,6 +215,12 @@ def parse_args() -> argparse.Namespace:
         help="Use only first N frames if video is longer.",
     )
     parser.add_argument(
+        "--max_videos",
+        type=int,
+        default=None,
+        help="Optional cap on number of videos to process (sorted order).",
+    )
+    parser.add_argument(
         "--iters",
         type=int,
         default=20,
@@ -275,6 +281,10 @@ def main() -> None:
         f"Start video(s). "
     )
     video_paths = collect_video_paths(args.video_path, args.video_dir)
+    if args.max_videos is not None:
+        if args.max_videos <= 0:
+            raise ValueError("--max_videos must be a positive integer.")
+        video_paths = video_paths[: args.max_videos]
     log_progress(
         f"Found {len(video_paths)} video(s). "
         f"Device={device.type}, max_frames={args.max_frames}, iters={args.iters}"
