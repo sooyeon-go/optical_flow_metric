@@ -17,11 +17,31 @@ This folder provides a RAFT-based motion score for input videos.
 conda create -n optical_flow python=3.10 -y
 conda activate optical_flow
 
-# GPU (single GPU is enough)
+# GPU (single GPU is enough) - install torch ONLY via conda
 conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
 
-# Python deps
+# Python deps (numpy/scipy/opencv only; no torch in requirements.txt)
 pip install -r /mnt/sy/test_spotting/optical_flow_metric/requirements.txt
+```
+
+### If you see `undefined symbol: iJIT_NotifyEvent`
+
+This usually means pip torch and conda torch were mixed.
+
+```bash
+conda activate optical_flow
+bash /mnt/sy/test_spotting/optical_flow_metric/fix_torch_env.sh
+```
+
+Or manually:
+
+```bash
+pip uninstall -y torch torchvision torchaudio
+rm -rf "$CONDA_PREFIX/lib/python3.10/site-packages/torch"*
+conda install -y --force-reinstall pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
+unset LD_LIBRARY_PATH
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+pip install -r requirements.txt
 ```
 
 CPU only:

@@ -5,6 +5,7 @@ import argparse
 import inspect
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -77,6 +78,11 @@ def _ensure_torch_meshgrid_compatibility() -> None:
 _ensure_torch_meshgrid_compatibility()
 
 
+def log_progress(message: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
+
+
 def initialize_raft_model(
     raft_model_path: Path,
     device: torch.device,
@@ -133,6 +139,7 @@ def score_video_motion(
     frames: List[Any],
     device: torch.device,
     iters: int,
+    video_name: str,
 ) -> Dict[str, float]:
     from RAFT.utils.utils import InputPadder
     import numpy as np
@@ -142,8 +149,9 @@ def score_video_motion(
 
     pair_mean_magnitudes: List[float] = []
 
+    total_pairs = len(frames) - 1
     with torch.no_grad():
-        for idx in range(len(frames) - 1):
+        for idx in range(total_pairs):
             frame1 = frame_to_tensor(frames[idx], device)
             frame2 = frame_to_tensor(frames[idx + 1], device)
 
@@ -159,6 +167,12 @@ def score_video_motion(
 
             magnitude = np.linalg.norm(flow_xy, axis=2)
             pair_mean_magnitudes.append(float(magnitude.mean()))
+            pair_idx = idx + 1
+            if pair_idx == 1 or pair_idx == total_pairs or pair_idx % 10 == 0:
+                log_progress(
+                    f"[{video_name}] frame-pair progress: "
+                    f"{pair_idx}/{total_pairs}"
+                )
 
     pair_scores = np.asarray(pair_mean_magnitudes, dtype=np.float64)
     return {
@@ -258,21 +272,36 @@ def main() -> None:
     raft_model_path = initialize_runtime_paths(args.weight_dir)
 
     video_paths = collect_video_paths(args.video_path, args.video_dir)
+    log_progress(
+        f"Found {len(video_paths)} video(s). "
+        f"Device={device.type}, max_frames={args.max_frames}, iters={args.iters}"
+    )
+    log_progress(f"Loading RAFT weights from: {raft_model_path}")
     raft_model = initialize_raft_model(
         raft_model_path=raft_model_path,
         device=device,
         mixed_precision=args.mixed_precision,
     )
+    log_progress("RAFT model loaded.")
 
     per_video_results: Dict[str, Dict[str, Any]] = {}
-    for video_path in video_paths:
+    total_videos = len(video_paths)
+    for video_idx, video_path in enumerate(video_paths, start=1):
         try:
+            log_progress(
+                f"[{video_idx}/{total_videos}] Start video: {video_path.name}"
+            )
             frames = load_video_frames(video_path=video_path, max_frames=args.max_frames)
+            log_progress(
+                f"[{video_idx}/{total_videos}] Loaded {len(frames)} frame(s) "
+                f"from {video_path.name}"
+            )
             score = score_video_motion(
                 raft_model=raft_model,
                 frames=frames,
                 device=device,
                 iters=args.iters,
+                video_name=video_path.name,
             )
             per_video_results[video_path.name] = {
                 "video_path": str(video_path),
@@ -281,11 +310,19 @@ def main() -> None:
                 "optical_flow_magnitude_score": score["mean_magnitude"],
                 "details": score,
             }
+            log_progress(
+                f"[{video_idx}/{total_videos}] Done {video_path.name} | "
+                f"score={score['mean_magnitude']:.6f}"
+            )
         except Exception as error:  # pylint: disable=broad-except
             per_video_results[video_path.name] = {
                 "video_path": str(video_path),
                 "error": str(error),
             }
+            log_progress(
+                f"[{video_idx}/{total_videos}] Failed {video_path.name} | "
+                f"error={error}"
+            )
 
     valid_scores = [
         item["optical_flow_magnitude_score"]
@@ -304,6 +341,9 @@ def main() -> None:
         "videos": per_video_results,
     }
 
+    log_progress(
+        f"Completed. Scored {len(valid_scores)}/{len(video_paths)} video(s)."
+    )
     print(json.dumps(result, indent=2))
 
     if args.save_json is not None:

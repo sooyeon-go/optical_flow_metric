@@ -1,19 +1,14 @@
-# Optical flow metric runtime dependencies.
-# Recommended setup (conda):
+# Optical flow metric dependencies (pip only).
+# Install PyTorch with conda FIRST, then install this file.
+#
 #   conda create -n optical_flow python=3.10 -y
 #   conda activate optical_flow
 #   conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
 #   pip install -r requirements.txt
 #
-# CPU-only:
-#   conda install pytorch torchvision cpuonly -c pytorch
-#   pip install -r requirements.txt
+# Do NOT pip install torch/torchvision here. Mixed pip+conda torch often causes:
+#   ImportError: libtorch_cpu.so: undefined symbol: iJIT_NotifyEvent
 
-numpy>=1.21.0
+numpy>=1.21.0,<2.3
 scipy>=1.7.0
 opencv-python>=4.5.0
-
-# If PyTorch is not installed via conda, these lines install CPU wheels by default.
-# For GPU, prefer the conda install command above.
-torch>=1.10.0
-torchvision>=0.11.0
