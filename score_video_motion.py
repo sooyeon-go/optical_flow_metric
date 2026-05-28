@@ -4,6 +4,7 @@
 import argparse
 import inspect
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -246,7 +247,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def collect_video_paths(video_path: Path, video_dir: Path) -> List[Path]:
+def collect_video_paths(
+    video_path: Path,
+    video_dir: Path,
+    max_videos: int = None,
+) -> List[Path]:
     if video_path is not None:
         resolved_video = video_path.resolve()
         if not resolved_video.exists():
@@ -260,13 +265,27 @@ def collect_video_paths(video_path: Path, video_dir: Path) -> List[Path]:
         raise NotADirectoryError(f"Not a directory: {resolved_dir}")
 
     video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
-    paths = sorted(
-        [
-            file_path
-            for file_path in resolved_dir.iterdir()
-            if file_path.is_file() and file_path.suffix.lower() in video_extensions
-        ]
-    )
+    if max_videos is not None:
+        # Fast path for debug runs: stop scanning once enough videos are found.
+        paths: List[Path] = []
+        with os.scandir(resolved_dir) as entries:
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                suffix = Path(entry.name).suffix.lower()
+                if suffix not in video_extensions:
+                    continue
+                paths.append(Path(entry.path))
+                if len(paths) >= max_videos:
+                    return paths
+    else:
+        paths = sorted(
+            [
+                file_path
+                for file_path in resolved_dir.iterdir()
+                if file_path.is_file() and file_path.suffix.lower() in video_extensions
+            ]
+        )
     if not paths:
         raise ValueError(f"No supported video files found in: {resolved_dir}")
     return paths
@@ -274,17 +293,19 @@ def collect_video_paths(video_path: Path, video_dir: Path) -> List[Path]:
 
 def main() -> None:
     args = parse_args()
+    if args.max_videos is not None and args.max_videos <= 0:
+        raise ValueError("--max_videos must be a positive integer.")
     device = torch.device(args.device)
     raft_model_path = initialize_runtime_paths(args.weight_dir)
 
     log_progress(
         f"Start video(s). "
     )
-    video_paths = collect_video_paths(args.video_path, args.video_dir)
-    if args.max_videos is not None:
-        if args.max_videos <= 0:
-            raise ValueError("--max_videos must be a positive integer.")
-        video_paths = video_paths[: args.max_videos]
+    video_paths = collect_video_paths(
+        args.video_path,
+        args.video_dir,
+        max_videos=args.max_videos,
+    )
     log_progress(
         f"Found {len(video_paths)} video(s). "
         f"Device={device.type}, max_frames={args.max_frames}, iters={args.iters}"
