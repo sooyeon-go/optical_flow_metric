@@ -11,6 +11,26 @@ This folder provides a RAFT-based motion score for input videos.
 - Computes optical flow between consecutive frame pairs with RAFT.
 - Returns per-video score as the mean flow magnitude.
 
+## Environment setup (conda)
+
+```bash
+conda create -n optical_flow python=3.10 -y
+conda activate optical_flow
+
+# GPU (single GPU is enough)
+conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
+
+# Python deps
+pip install -r /mnt/sy/test_spotting/optical_flow_metric/requirements.txt
+```
+
+CPU only:
+
+```bash
+conda install pytorch torchvision cpuonly -c pytorch
+pip install -r /mnt/sy/test_spotting/optical_flow_metric/requirements.txt
+```
+
 ## Run
 
 ```bash
