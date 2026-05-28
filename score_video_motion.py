@@ -291,6 +291,37 @@ def collect_video_paths(
     return paths
 
 
+def build_result_payload(
+    per_video_results: Dict[str, Dict[str, Any]],
+    num_videos_total: int,
+    max_frames_limit: int,
+) -> Dict[str, Any]:
+    valid_scores = [
+        item["optical_flow_magnitude_score"]
+        for item in per_video_results.values()
+        if "optical_flow_magnitude_score" in item
+    ]
+    aggregate_score = (
+        float(sum(valid_scores) / len(valid_scores)) if valid_scores else None
+    )
+    return {
+        "num_videos_total": num_videos_total,
+        "num_videos_scored": len(valid_scores),
+        "num_videos_processed": len(per_video_results),
+        "max_frames_limit": max_frames_limit,
+        "aggregate_mean_optical_flow_magnitude_score": aggregate_score,
+        "videos": per_video_results,
+    }
+
+
+def write_result_json(save_path: Path, payload: Dict[str, Any]) -> None:
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = save_path.with_suffix(save_path.suffix + ".tmp")
+    with temp_path.open("w", encoding="utf-8") as output_file:
+        json.dump(payload, output_file, indent=2)
+    temp_path.replace(save_path)
+
+
 def main() -> None:
     args = parse_args()
     if args.max_videos is not None and args.max_videos <= 0:
@@ -318,8 +349,17 @@ def main() -> None:
     )
     log_progress("RAFT model loaded.")
 
+    save_path = args.save_json.resolve() if args.save_json is not None else None
     per_video_results: Dict[str, Dict[str, Any]] = {}
     total_videos = len(video_paths)
+
+    if save_path is not None:
+        write_result_json(
+            save_path,
+            build_result_payload(per_video_results, total_videos, args.max_frames),
+        )
+        log_progress(f"Initialized JSON checkpoint: {save_path}")
+
     for video_idx, video_path in enumerate(video_paths, start=1):
         try:
             log_progress(
@@ -358,33 +398,23 @@ def main() -> None:
                 f"error={error}"
             )
 
-    valid_scores = [
-        item["optical_flow_magnitude_score"]
-        for item in per_video_results.values()
-        if "optical_flow_magnitude_score" in item
-    ]
-    aggregate_score = (
-        float(sum(valid_scores) / len(valid_scores)) if valid_scores else None
-    )
+        if save_path is not None:
+            write_result_json(
+                save_path,
+                build_result_payload(per_video_results, total_videos, args.max_frames),
+            )
+            log_progress(f"Updated JSON checkpoint: {save_path}")
 
-    result = {
-        "num_videos_total": len(video_paths),
-        "num_videos_scored": len(valid_scores),
-        "max_frames_limit": args.max_frames,
-        "aggregate_mean_optical_flow_magnitude_score": aggregate_score,
-        "videos": per_video_results,
-    }
+    result = build_result_payload(per_video_results, total_videos, args.max_frames)
 
     log_progress(
-        f"Completed. Scored {len(valid_scores)}/{len(video_paths)} video(s)."
+        f"Completed. Scored {result['num_videos_scored']}/{total_videos} video(s)."
     )
     print(json.dumps(result, indent=2))
 
-    if args.save_json is not None:
-        save_path = args.save_json.resolve()
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with save_path.open("w", encoding="utf-8") as output_file:
-            json.dump(result, output_file, indent=2)
+    if save_path is not None:
+        write_result_json(save_path, result)
+        log_progress(f"Final JSON saved: {save_path}")
 
 
 if __name__ == "__main__":
