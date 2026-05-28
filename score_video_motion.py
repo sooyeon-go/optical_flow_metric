@@ -271,6 +271,9 @@ def main() -> None:
     device = torch.device(args.device)
     raft_model_path = initialize_runtime_paths(args.weight_dir)
 
+     log_progress(
+        f"Start video(s). "
+    )
     video_paths = collect_video_paths(args.video_path, args.video_dir)
     log_progress(
         f"Found {len(video_paths)} video(s). "
