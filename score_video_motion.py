@@ -216,10 +216,16 @@ def parse_args() -> argparse.Namespace:
         help="Use only first N frames if video is longer.",
     )
     parser.add_argument(
+        "--skip_videos",
+        type=int,
+        default=0,
+        help="Skip the first N videos (same scan order as --max_videos fast path).",
+    )
+    parser.add_argument(
         "--max_videos",
         type=int,
         default=None,
-        help="Optional cap on number of videos to process (sorted order).",
+        help="Optional cap on number of videos to process after skip.",
     )
     parser.add_argument(
         "--iters",
@@ -251,6 +257,7 @@ def collect_video_paths(
     video_path: Path,
     video_dir: Path,
     max_videos: int = None,
+    skip_videos: int = 0,
 ) -> List[Path]:
     if video_path is not None:
         resolved_video = video_path.resolve()
@@ -265,9 +272,11 @@ def collect_video_paths(
         raise NotADirectoryError(f"Not a directory: {resolved_dir}")
 
     video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
-    if max_videos is not None:
-        # Fast path for debug runs: stop scanning once enough videos are found.
+    use_fast_scan = max_videos is not None or skip_videos > 0
+    if use_fast_scan:
+        # Same filesystem scan order as the first 50k batch (no full-dir sort).
         paths: List[Path] = []
+        seen = 0
         with os.scandir(resolved_dir) as entries:
             for entry in entries:
                 if not entry.is_file():
@@ -275,8 +284,11 @@ def collect_video_paths(
                 suffix = Path(entry.name).suffix.lower()
                 if suffix not in video_extensions:
                     continue
+                if seen < skip_videos:
+                    seen += 1
+                    continue
                 paths.append(Path(entry.path))
-                if len(paths) >= max_videos:
+                if max_videos is not None and len(paths) >= max_videos:
                     return paths
     else:
         paths = sorted(
@@ -286,6 +298,8 @@ def collect_video_paths(
                 if file_path.is_file() and file_path.suffix.lower() in video_extensions
             ]
         )
+        if skip_videos > 0:
+            paths = paths[skip_videos:]
     if not paths:
         raise ValueError(f"No supported video files found in: {resolved_dir}")
     return paths
@@ -295,6 +309,8 @@ def build_result_payload(
     per_video_results: Dict[str, Dict[str, Any]],
     num_videos_total: int,
     max_frames_limit: int,
+    skip_videos: int = 0,
+    max_videos: int = None,
 ) -> Dict[str, Any]:
     valid_scores = [
         item["optical_flow_magnitude_score"]
@@ -304,14 +320,18 @@ def build_result_payload(
     aggregate_score = (
         float(sum(valid_scores) / len(valid_scores)) if valid_scores else None
     )
-    return {
+    payload = {
         "num_videos_total": num_videos_total,
         "num_videos_scored": len(valid_scores),
         "num_videos_processed": len(per_video_results),
         "max_frames_limit": max_frames_limit,
+        "skip_videos": skip_videos,
         "aggregate_mean_optical_flow_magnitude_score": aggregate_score,
         "videos": per_video_results,
     }
+    if max_videos is not None:
+        payload["max_videos"] = max_videos
+    return payload
 
 
 def write_result_json(save_path: Path, payload: Dict[str, Any]) -> None:
@@ -324,6 +344,8 @@ def write_result_json(save_path: Path, payload: Dict[str, Any]) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.skip_videos < 0:
+        raise ValueError("--skip_videos must be >= 0.")
     if args.max_videos is not None and args.max_videos <= 0:
         raise ValueError("--max_videos must be a positive integer.")
     device = torch.device(args.device)
@@ -336,9 +358,11 @@ def main() -> None:
         args.video_path,
         args.video_dir,
         max_videos=args.max_videos,
+        skip_videos=args.skip_videos,
     )
     log_progress(
-        f"Found {len(video_paths)} video(s). "
+        f"Found {len(video_paths)} video(s) "
+        f"(skip={args.skip_videos}, max_videos={args.max_videos}). "
         f"Device={device.type}, max_frames={args.max_frames}, iters={args.iters}"
     )
     log_progress(f"Loading RAFT weights from: {raft_model_path}")
@@ -356,7 +380,13 @@ def main() -> None:
     if save_path is not None:
         write_result_json(
             save_path,
-            build_result_payload(per_video_results, total_videos, args.max_frames),
+            build_result_payload(
+                per_video_results,
+                total_videos,
+                args.max_frames,
+                skip_videos=args.skip_videos,
+                max_videos=args.max_videos,
+            ),
         )
         log_progress(f"Initialized JSON checkpoint: {save_path}")
 
@@ -401,11 +431,23 @@ def main() -> None:
         if save_path is not None:
             write_result_json(
                 save_path,
-                build_result_payload(per_video_results, total_videos, args.max_frames),
+                build_result_payload(
+                    per_video_results,
+                    total_videos,
+                    args.max_frames,
+                    skip_videos=args.skip_videos,
+                    max_videos=args.max_videos,
+                ),
             )
             log_progress(f"Updated JSON checkpoint: {save_path}")
 
-    result = build_result_payload(per_video_results, total_videos, args.max_frames)
+    result = build_result_payload(
+        per_video_results,
+        total_videos,
+        args.max_frames,
+        skip_videos=args.skip_videos,
+        max_videos=args.max_videos,
+    )
 
     log_progress(
         f"Completed. Scored {result['num_videos_scored']}/{total_videos} video(s)."
