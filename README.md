@@ -81,10 +81,11 @@ python /mnt/sy/test_spotting/optical_flow_metric/score_video_motion.py \
   --save_json /mnt/sy/test_spotting/optical_flow_metric/result.json
 ```
 
-## Filter videos above combined average motion
+## Filter videos above average motion (transition_count == 0)
 
-Merge two result JSON files and keep videos whose score is above the mean of
-their `aggregate_mean_optical_flow_magnitude_score` values:
+Merge two result JSON files, compute the mean `optical_flow_magnitude_score`
+only among videos with `transition_count == 0`, and keep those at or above
+that mean:
 
 ```bash
 python /mnt/sy/test_spotting/optical_flow_metric/filter_above_avg_motion.py \
@@ -93,7 +94,7 @@ python /mnt/sy/test_spotting/optical_flow_metric/filter_above_avg_motion.py \
   --output_json /data/project-vilab/sy/optical_flow_metric/output/result_above_avg_motion.json
 ```
 
-Use `--inclusive` if you want `score >= threshold` instead of `score > threshold`.
+Use `--strict` if you want `score > threshold` instead of the default `score >= threshold`.
 
 ## Output JSON shape
 
